@@ -1,0 +1,15 @@
+# Thị giác máy tính & Nhận diện tư thế (Computer Vision & Pose Estimation)
+opencv-python>=4.8.0.76
+mediapipe==0.10.14
+
+# Tính toán ma trận và xử lý dữ liệu
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0
+
+# Trực quan hóa dữ liệu và vẽ đồ thị
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Hỗ trợ tiến trình và môi trường Jupyter Notebook
+tqdm>=4.65.0
+ipykernel>=6.25.0
