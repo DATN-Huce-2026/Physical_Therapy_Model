@@ -40,6 +40,7 @@ class PoseDetector:
 
     def get_landmarks(self, frame, normalize_pixel=False):
         landmark_data = {}
+
         if not self.results.pose_landmarks:
             return landmark_data
 
@@ -58,10 +59,10 @@ class PoseDetector:
 
             landmark_data[index] = {
                 "name": landmark_name,
-                "x": x_val,
-                "y": y_val,
-                "z": lm.z,
-                "visibility": lm.visibility 
+                "pixel": (x_val, y_val), # tọa độ pixel (int) 
+                "coor_2d": (lm.x, lm.y), # tọa độ chuẩn hóa [0.0, 1.0] -> tính góc 2D
+                "coor_3d": (lm.x, lm.y, lm.z), # tọa độ không gian 3D -> tính góc 3D nếu cần
+                "visibility": float(lm.visibility) # độ tin cậy [0.0, 1.0] -> kiểm tra trước khi tính góc
             }
         return landmark_data
 

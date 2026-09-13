@@ -2,7 +2,9 @@ import cv2
 from src.pose_detector import PoseDetector
 
 def main():
-    video_source = r"D:\DATN\Physical_Therapy_Model\data\11.mp4"
+    # video_source = r"D:\DATN\Physical_Therapy_Model\data\11.mp4"
+    video_source = 0
+
     cap = cv2.VideoCapture(video_source)
 
     detector = PoseDetector(model_complexity=1)
