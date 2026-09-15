@@ -59,3 +59,6 @@ venv.bak/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Ket qua sinh tu dong tu main.py
+angles/
