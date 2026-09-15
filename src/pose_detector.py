@@ -66,6 +66,26 @@ class PoseDetector:
             }
         return landmark_data
 
+    def get_world_landmarks(self):
+        """Tọa độ 3D thực (đơn vị mét, gốc tại trung điểm hông).
+
+        Khác với coor_3d trong get_landmarks (đã chuẩn hóa theo khung hình nên
+        bị méo theo tỉ lệ ảnh và phối cảnh), dữ liệu này có tỉ lệ metric đồng
+        nhất trên cả 3 trục -> dùng để tính góc 3D mới chính xác.
+        """
+        world_data = {}
+
+        if not getattr(self, "results", None) or not self.results.pose_world_landmarks:
+            return world_data
+
+        for index, lm in enumerate(self.results.pose_world_landmarks.landmark):
+            world_data[index] = {
+                "name": self.mp_pose.PoseLandmark(index).name,
+                "coor_3d": (lm.x, lm.y, lm.z),
+                "visibility": float(lm.visibility)
+            }
+        return world_data
+
     def draw_fps(self, frame, pos=(20, 50), color=(0, 255, 0)):
         c_time = time.time()
         if (c_time - self.p_time) > 0:
