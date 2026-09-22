@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from src.angle_logger import AngleLogger
+from src.angle_logger import AngleLogger, ExerciseAngleLogger
 
 JOINTS = ["LEFT_ELBOW", "RIGHT_KNEE"]
 
@@ -150,6 +150,32 @@ class TestXuatFile(unittest.TestCase):
         self.assertEqual(record["LEFT_ELBOW_2d"], 90.12)
         self.assertEqual(record["LEFT_ELBOW_2d_smooth"], 90.99)
         self.assertEqual(record["timestamp_sec"], 0.1235)
+
+
+class TestExerciseAngleLogger(unittest.TestCase):
+
+    def test_schema_batch_chi_co_bai_tap_rep_frame_va_goc(self):
+        logger = ExerciseAngleLogger()
+        logger.add("squat", "rep_01", 0,
+                   {"LEFT_KNEE": angle_entry(90.0, s2d=91.25)},
+                   ["LEFT_KNEE"], "angle_2d_smooth")
+
+        self.assertEqual(logger.columns,
+                         ["exercise", "rep_id", "frame", "LEFT_KNEE"])
+        self.assertEqual(logger.records[0],
+                         {"exercise": "squat", "rep_id": "rep_01",
+                          "frame": 0, "LEFT_KNEE": 91.25})
+
+    def test_chi_tao_cot_khi_goc_co_gia_tri(self):
+        logger = ExerciseAngleLogger()
+        logger.add("elbow", "rep_01", 0, {}, ["LEFT_ELBOW"], "angle_2d")
+        logger.add("knee", "rep_02", 0,
+                   {"RIGHT_KNEE": angle_entry(100.0)}, ["RIGHT_KNEE"], "angle_2d")
+
+        self.assertEqual(logger.columns,
+                         ["exercise", "rep_id", "frame", "RIGHT_KNEE"])
+        self.assertNotIn("LEFT_ELBOW", logger.records[0])
+        self.assertNotIn("LEFT_ELBOW", logger.records[1])
 
 
 if __name__ == "__main__":

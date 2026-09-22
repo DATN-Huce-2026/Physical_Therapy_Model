@@ -128,3 +128,40 @@ class AngleLogger:
         folder = os.path.dirname(path)
         if folder:
             os.makedirs(folder, exist_ok=True)
+
+
+class ExerciseAngleLogger:
+    """Ghi một dòng cho mỗi rep với góc đầu, góc biên và ROM của mỗi khớp."""
+
+    MEASURES = ("start", "turning", "rom")
+
+    def __init__(self):
+        self.records = []
+        self.joint_names = []
+
+    @property
+    def columns(self):
+        columns = ["exercise", "rep_id"]
+        for joint_name in self.joint_names:
+            columns.extend(f"{joint_name}_{measure}" for measure in self.MEASURES)
+        return columns
+
+    def add_rep(self, exercise, rep_id, measurements):
+        """Them {khop: {start, turning, rom}} cua mot rep vao bang."""
+        record = {"exercise": exercise, "rep_id": rep_id}
+        for joint_name, values in measurements.items():
+            if joint_name not in self.joint_names:
+                self.joint_names.append(joint_name)
+            for measure in self.MEASURES:
+                value = values.get(measure)
+                if value is not None:
+                    record[f"{joint_name}_{measure}"] = round(value, 2)
+        self.records.append(record)
+
+    def to_csv(self, path):
+        AngleLogger._ensure_dir(path)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(self.records)
+        return path

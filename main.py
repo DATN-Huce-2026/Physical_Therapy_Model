@@ -1,22 +1,42 @@
 import argparse
 import os
+import re
 import sys
 import time
+from pathlib import Path
 
 import cv2
 
 from src.pose_detector import PoseDetector
 from src.angle_calculator import AngleCalculator
-from src.angle_logger import AngleLogger
+from src.angle_logger import AngleLogger, ExerciseAngleLogger
 from src.angle_smoother import AngleSmoother
+from src.rep_segmenter import RepSegmenter
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Nhận diện tư thế và tính góc khớp")
+    # Tham so cu cho che do mot video/webcam; giu lai dang comment theo yeu cau.
+    '''
     parser.add_argument("--source", default="0",
                         help="Chỉ số webcam (vd 0) hoặc đường dẫn file video")
     parser.add_argument("--out-dir", default="angles",
                         help="Thư mục xuất chuỗi giá trị góc")
+    '''
+    parser.add_argument("--input-dir", default="data",
+                        help="Folder video; folder con dau tien la ten bai tap")
+    parser.add_argument("--output-file", default="angles/angles.csv",
+                        help="Duong dan file CSV tong hop")
+    parser.add_argument("--angle-dimension", default="2d_smooth",
+                        choices=("2d", "2d_smooth", "3d", "3d_smooth"),
+                        help="Loai goc ghi vao CSV")
+    parser.add_argument("--rep-joints", nargs="+", default=None,
+                        choices=tuple(AngleCalculator.JOINT_TRIPLETS),
+                        help="Cac khop dung de tach rep, vd LEFT_KNEE RIGHT_KNEE")
+    parser.add_argument("--rep-min-amplitude", type=float, default=4.0,
+                        help="Bien do goc toi thieu (do) de tinh la mot lan doi chieu")
+    parser.add_argument("--rep-min-distance", type=int, default=6,
+                        help="So frame toi thieu giua hai diem doi chieu")
     parser.add_argument("--min-visibility", type=float, default=0.5,
                         help="Ngưỡng tin cậy tối thiểu của khớp để tính góc")
     parser.add_argument("--no-smooth", action="store_true",
@@ -30,6 +50,30 @@ def parse_args():
     parser.add_argument("--no-display", action="store_true",
                         help="Chạy ngầm không mở cửa sổ (dùng để xuất log hàng loạt)")
     return parser.parse_args()
+
+
+# Sua khoa nay de khop chinh xac ten thu muc bai tap cua bo du lieu.
+# Vi du: videos/squat/rep_01.mp4 chi ghi goc hong va goi hai ben.
+EXERCISE_JOINTS = {
+    "elbow": ("LEFT_ELBOW", "RIGHT_ELBOW"),
+    "shoulder": ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
+    "hip": ("LEFT_HIP", "RIGHT_HIP"),
+    "knee": ("LEFT_KNEE", "RIGHT_KNEE"),
+    "squat": ("LEFT_HIP", "RIGHT_HIP", "LEFT_KNEE", "RIGHT_KNEE"),
+    "sit_to_stand": ("LEFT_HIP", "RIGHT_HIP", "LEFT_KNEE", "RIGHT_KNEE"),
+}
+EXERCISE_CODES = {
+    "E01": "Abduction",
+    "E02": "Adduction",
+    "E03": "Lateral_Rotation",
+    "E04": "Medial_Rotation",
+    "E05": "Circumduction",
+    "E06": "Wrist_Extension",
+    "E07": "Hip_Joint_Flexion",
+    "E08": "Lumbar_Flexion",
+    "E09": "Back_Extension",
+}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".m4v"}
 
 
 def resolve_source(source):
@@ -148,6 +192,163 @@ def run_capture(cap, args, detector, calculator, smoother, logger, is_webcam):
     return frame_id
 
 
+def discover_videos(input_dir):
+    """Tim tat ca video trong input_dir, ke ca cac thu muc con."""
+    root = Path(input_dir)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Khong tim thay folder video: {root}")
+    return sorted(path for path in root.rglob("*")
+                  if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS)
+
+
+def video_labels(video_path, input_dir):
+    """Doi ma E01-E09 trong ten file thanh ten bai tap de ghi vao CSV."""
+    root = Path(input_dir).resolve()
+    match = re.search(r"(?<![A-Za-z0-9])E0[1-9](?![A-Za-z0-9])", video_path.stem.upper())
+    if match and match.group() in EXERCISE_CODES:
+        exercise = EXERCISE_CODES[match.group()]
+    else:
+        exercise = video_path.parent.name if video_path.parent.resolve() != root else video_path.stem
+    return exercise, video_path.stem
+
+
+def joints_for_exercise(exercise):
+    """Tra ve cac goc can ghi; bai tap chua khai bao se giu toan bo goc."""
+    key = exercise.strip().lower().replace("-", "_").replace(" ", "_")
+    return EXERCISE_JOINTS.get(key, tuple(AngleCalculator.JOINT_TRIPLETS))
+
+
+def detect_reps(samples, report_joint_names, args):
+    """Chon tin hieu dem rep it bi anh huong boi cac khop khong lien quan."""
+    segmenter = RepSegmenter(
+        min_distance=args.rep_min_distance,
+        min_amplitude=args.rep_min_amplitude,
+    )
+    if args.rep_joints:
+        return segmenter.find_reps(samples, args.rep_joints), tuple(args.rep_joints)
+
+    # Thu moi cap trai/phai dang co trong bai tap. Vi du squat thu cap goi va
+    # cap hong rieng, thay vi lay trung vi cua ca bon khop (co the lam mo dao
+    # chieu). Cap tim thay nhieu chu ky hoan chinh nhat se duoc chon.
+    pairs = (
+        ("LEFT_ELBOW", "RIGHT_ELBOW"),
+        ("LEFT_SHOULDER", "RIGHT_SHOULDER"),
+        ("LEFT_HIP", "RIGHT_HIP"),
+        ("LEFT_KNEE", "RIGHT_KNEE"),
+    )
+    candidates = [pair for pair in pairs if all(name in report_joint_names for name in pair)]
+    candidates.append(tuple(report_joint_names))
+
+    best_reps = []
+    best_joints = tuple(report_joint_names)
+    for candidate in candidates:
+        reps = segmenter.find_reps(samples, candidate)
+        if len(reps) > len(best_reps):
+            best_reps, best_joints = reps, candidate
+    return best_reps, best_joints
+
+
+def run_batch_capture(cap, args, detector, calculator, smoother, batch_logger,
+                      exercise, rep_id):
+    """Xu ly video, tach rep va chi ghi ROM cua tung rep vao CSV."""
+    frame_id = 0
+    value_key = f"angle_{args.angle_dimension}"
+    samples = []
+
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            break
+
+        frame, angles, has_pose = analyze_frame(
+            frame, detector, calculator, smoother, frame_id
+        )
+        sample = {}
+        for joint_name, data in angles.items():
+            value = data.get(value_key) if data else None
+            if value is None and data and value_key.endswith("_smooth"):
+                value = data.get(value_key.removesuffix("_smooth"))
+            sample[joint_name] = value
+        samples.append(sample)
+        frame_id += 1
+
+        # Che do hien thi video da duoc tat: khi chay batch chi tao CSV.
+        # if args.no_display:
+        #     continue
+        #
+        # frame = render_frame(
+        #     frame, detector, calculator, angles, has_pose,
+        #     show_arc=not args.no_arc, value_key=value_key
+        # )
+        # cv2.imshow("Physiotherapy Pose Estimation", frame)
+        # if cv2.waitKey(delay) & 0xFF == ord("q"):
+        #     break
+
+    # Khop dung de dem rep co the khac voi cac khop can xuat trong CSV. Vi du,
+    # squat nen dem bang hai dau goi, nhung van xuat ca goc hong.
+    report_joint_names = joints_for_exercise(exercise)
+    reps, signal_joint_names = detect_reps(samples, report_joint_names, args)
+    for rep_number, (start, turning, end) in enumerate(reps, start=1):
+        measurements = {}
+        for joint_name in report_joint_names:
+            values = [sample.get(joint_name) for sample in samples[start:end + 1]]
+            values = [value for value in values if value is not None]
+            measurements[joint_name] = {
+                "start": samples[start].get(joint_name),
+                "turning": samples[turning].get(joint_name),
+                "rom": max(values) - min(values) if values else None,
+            }
+        batch_logger.add_rep(exercise, f"{rep_id}_{rep_number}", measurements)
+
+    print(f"  Tim thay {len(reps)} rep hoan chinh (dem bang: {', '.join(signal_joint_names)}).")
+    return frame_id
+
+
+def main_batch():
+    args = parse_args()
+    try:
+        videos = discover_videos(args.input_dir)
+    except FileNotFoundError as error:
+        print(error)
+        return 1
+
+    if not videos:
+        print(f"Khong co video hop le trong: {args.input_dir}")
+        return 1
+
+    batch_logger = ExerciseAngleLogger()
+    use_smooth = not args.no_smooth
+    total_frames = 0
+
+    for video_path in videos:
+        exercise, rep_id = video_labels(video_path, args.input_dir)
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            print(f"Bo qua video khong mo duoc: {video_path}")
+            continue
+
+        detector = PoseDetector(model_complexity=1)
+        # Khong gioi han theo bai tap: cot CSV duoc tao theo goc thuc su co
+        # gia tri trong bat ky frame/video nao.
+        calculator = AngleCalculator(min_visibility=args.min_visibility)
+        smoother = (AngleSmoother(window=args.smooth_window, alpha=args.smooth_alpha)
+                    if use_smooth else None)
+        print(f"Dang xu ly {video_path.name}: exercise={exercise}, rep_id={rep_id}")
+        try:
+            total_frames += run_batch_capture(
+                cap, args, detector, calculator, smoother, batch_logger, exercise, rep_id
+            )
+        finally:
+            cap.release()
+
+    # Khong mo cua so video trong che do batch nen khong can dong cua so.
+    # cv2.destroyAllWindows()
+    csv_path = batch_logger.to_csv(args.output_file)
+    print(f"Da xu ly {len(videos)} video, {total_frames} frame.")
+    print(f"CSV tong hop: {csv_path}")
+    return 0
+
+
 def main():
     args = parse_args()
 
@@ -192,4 +393,6 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Che do cu chi xu ly mot video/webcam:
+    # sys.exit(main())
+    sys.exit(main_batch())
