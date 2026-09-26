@@ -12,6 +12,7 @@ from src.angle_calculator import AngleCalculator
 from src.angle_logger import AngleLogger, ExerciseAngleLogger
 from src.angle_smoother import AngleSmoother
 from src.rep_segmenter import RepSegmenter
+from create_labels import create_labels
 
 
 def parse_args():
@@ -344,8 +345,12 @@ def main_batch():
     # Khong mo cua so video trong che do batch nen khong can dong cua so.
     # cv2.destroyAllWindows()
     csv_path = batch_logger.to_csv(args.output_file)
+    label_count, unmatched_rep_ids, labels_path = create_labels(args.output_file)
     print(f"Da xu ly {len(videos)} video, {total_frames} frame.")
     print(f"CSV tong hop: {csv_path}")
+    print(f"CSV nhan: {labels_path} ({label_count} rep).")
+    if unmatched_rep_ids:
+        print(f"Bo qua {len(unmatched_rep_ids)} rep khong co video_name trong file marking.")
     return 0
 
 
