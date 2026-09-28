@@ -8,11 +8,13 @@ chuỗi góc theo trục thời gian.
 | Tệp | Vai trò |
 |---|---|
 | `main.py` | Pipeline chính: nhận diện → tính góc → vẽ → ghi log |
+| `realtime_predict.py` | Tách từng repetition từ camera và gọi model đúng/sai |
 | `export_keypoints.py` | Chỉ xuất tọa độ khớp thô ra JSON |
 | `src/pose_detector.py` | Bọc MediaPipe Pose, trả landmark và vẽ skeleton/FPS |
 | `src/angle_calculator.py` | Tính góc 2D/3D bằng tích vô hướng, vẽ cung tròn + số đo |
 | `src/angle_smoother.py` | Lọc nhiễu chuỗi góc (trung vị + EMA) |
 | `src/angle_logger.py` | Gom chuỗi góc theo thời gian, xuất CSV/JSON |
+| `src/repetition_tracker.py` | Phát hiện bắt đầu/đổi chiều/kết thúc và tạo feature repetition |
 | `tests/` | Bộ test tự động (`python -m unittest discover -s tests -t .`) |
 
 ## Chạy
@@ -24,6 +26,46 @@ python main.py --source data/20.mov --no-display   # chỉ xuất log, không m�
 ```
 
 Kết quả ghi vào `angles/angles_<tên video>.csv` và `.json`.
+
+## Dự đoán realtime từ webcam
+
+Cài cả dependency thị giác máy tính và training trong Python 3.11 (phù hợp với
+`mediapipe==0.10.14` mà dự án đang dùng), sau đó chạy:
+
+```powershell
+uv venv --python 3.11
+.venv\Scripts\activate
+uv pip install -r requirements.txt
+python realtime_predict.py
+```
+
+Giữ tư thế bắt đầu ổn định khoảng 0,5 giây, thực hiện trọn một repetition rồi
+quay về tư thế ban đầu. Chương trình chỉ dự đoán sau khi repetition hoàn thành.
+Nhấn `r` để lấy lại mốc góc ban đầu và `q` để thoát.
+
+Webcam mặc định được yêu cầu ở độ phân giải `1280x720` và cửa sổ có thể kéo lớn
+nhỏ mà vẫn giữ tỷ lệ. Có thể chọn kích thước khác:
+
+```powershell
+python realtime_predict.py --camera-width 1920 --camera-height 1080 `
+  --window-width 1440 --window-height 810
+```
+
+Panel trạng thái tự co theo độ phân giải và dùng nền bán trong suốt. Nếu hiện
+`Framing: ... joints - move back`, hãy lùi xa camera cho tới khi thấy vai, khuỷu,
+cổ tay và hông trong khung hình.
+
+Mặc định feature được tạo từ `angle_2d_smooth`. Có thể đổi nguồn góc, nhưng phải
+giống nguồn đã dùng để tạo dataset train:
+
+```powershell
+python realtime_predict.py --angle-dimension angle_3d_smooth
+```
+
+Quy ước của tracker realtime hiện tại là: `start` = trung vị trước chuyển động,
+`turning` = trung vị quanh điểm xa vị trí bắt đầu nhất, `rom` = max - min trong
+repetition. Cần đối chiếu quy ước này với script tạo dataset gốc trước khi dùng
+kết quả ngoài mục đích thử nghiệm.
 
 ## Đầu ra tọa độ của mỗi frame
 
