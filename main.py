@@ -108,7 +108,16 @@ def analyze_frame(frame, detector, calculator, smoother, frame_id, flip=False):
         # Lật ngang để người tập nhìn như soi gương.
         frame = cv2.flip(frame, 1)
 
-    frame = detector.find_pose(frame, draw=True)
+    try:
+        frame = detector.find_pose(frame, draw=True)
+    except (RuntimeError, ValueError, cv2.error) as error:
+        # Một frame hỏng hoặc lỗi TFLite không nên làm dừng cả batch.
+        print(f"Bo qua frame {frame_id} do loi MediaPipe: {error}")
+        detector.results = None
+        angles = calculator.compute({}, {})
+        if smoother is not None:
+            angles = smoother.apply(angles, frame_id)
+        return frame, angles, False
 
     # normalize_pixel=True để 'pixel' là tọa độ điểm ảnh thật: vừa dùng tính
     # góc 2D đúng tỉ lệ, vừa dùng làm vị trí vẽ cung tròn.
