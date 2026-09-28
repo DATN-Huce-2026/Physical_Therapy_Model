@@ -1,5 +1,6 @@
 import cv2
 import mediapipe as mp
+import numpy as np
 import time 
 
 class PoseDetector:
@@ -24,7 +25,14 @@ class PoseDetector:
         self.p_time = 0
 
     def find_pose(self, frame, draw=True):
+        if frame is None or not isinstance(frame, np.ndarray):
+            raise ValueError("Frame rỗng hoặc không phải numpy.ndarray")
+        if frame.ndim != 3 or frame.shape[2] != 3 or frame.shape[0] == 0 or frame.shape[1] == 0:
+            raise ValueError(f"Frame có shape không hợp lệ: {frame.shape}")
+
+        frame = np.ascontiguousarray(frame)
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_rgb = np.ascontiguousarray(img_rgb)
         img_rgb.flags.writeable = False
         self.results = self.pose.process(img_rgb)
         img_rgb.flags.writeable = True
