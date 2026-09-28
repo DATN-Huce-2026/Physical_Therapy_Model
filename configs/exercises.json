@@ -1,0 +1,22 @@
+{
+  "abduction": {
+    "feature_columns": [
+      "LEFT_ELBOW_start",
+      "LEFT_ELBOW_turning",
+      "LEFT_ELBOW_rom",
+      "RIGHT_ELBOW_start",
+      "RIGHT_ELBOW_turning",
+      "RIGHT_ELBOW_rom",
+      "LEFT_SHOULDER_start",
+      "LEFT_SHOULDER_turning",
+      "LEFT_SHOULDER_rom",
+      "RIGHT_SHOULDER_start",
+      "RIGHT_SHOULDER_turning",
+      "RIGHT_SHOULDER_rom"
+    ],
+    "lower_percentile": 5,
+    "upper_percentile": 95,
+    "profile_margin_deg": 3,
+    "decision_threshold": 0.5
+  }
+}
