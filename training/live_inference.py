@@ -37,40 +37,58 @@ class LiveRepetitionClassifier:
         self.min_observed_ratio = float(min_observed_ratio)
 
         artifact_features = tuple(self.artifact["feature_names"])
-        if artifact_features != self.config.feature_columns:
+        if artifact_features != self.config.model_columns:
             raise ValueError(
                 f"Feature model {artifact_features} khác config "
-                f"{self.config.feature_columns}"
+                f"{self.config.model_columns}"
             )
         if tuple(self.profile.feature_names) != self.config.feature_columns:
             raise ValueError("Feature reference_profile khác feature của model")
 
     @property
     def feature_names(self) -> tuple[str, ...]:
-        return self.config.feature_columns
+        return self.config.model_columns
 
-    def predict(self, feature_values: dict[str, float | None]) -> dict[str, object]:
+    def predict(self, feature_values: dict[str, object]) -> dict[str, object]:
         """Dự đoán một repetition từ mapping tên feature -> giá trị."""
         canonical_values = {
             canonical_name(name): value for name, value in feature_values.items()
         }
-        ordered_values = [
+        numeric_values = [
             self._numeric_or_nan(canonical_values.get(name))
-            for name in self.feature_names
+            for name in self.config.feature_columns
         ]
-        observed_count = int(np.isfinite(ordered_values).sum())
-        observed_ratio = observed_count / len(ordered_values)
+        categorical_values = [
+            self._category_or_unknown(canonical_values.get(name))
+            for name in self.config.categorical_columns
+        ]
+        ordered_values: list[object] = [*numeric_values, *categorical_values]
+        observed_count = int(np.isfinite(numeric_values).sum())
+        observed_ratio = observed_count / len(numeric_values)
         if observed_ratio < self.min_observed_ratio:
             raise InsufficientObservationError(
-                f"Chỉ quan sát được {observed_count}/{len(ordered_values)} feature "
+                f"Chỉ quan sát được {observed_count}/{len(numeric_values)} góc "
                 f"({observed_ratio:.0%}); cần ít nhất {self.min_observed_ratio:.0%}"
             )
+
+        allowed_categories = self.artifact.get("categorical_values", {})
+        for column, value in zip(
+            self.config.categorical_columns,
+            categorical_values,
+            strict=True,
+        ):
+            allowed = allowed_categories.get(column, [])
+            if allowed and value not in allowed:
+                raise ValueError(
+                    f"Category {column}={value!r} chưa xuất hiện khi train; "
+                    f"các giá trị hợp lệ: {allowed}"
+                )
 
         features = pd.DataFrame([ordered_values], columns=self.feature_names)
         probability = float(correct_probabilities(self.artifact["model"], features)[0])
         threshold = float(self.artifact["decision_threshold"])
         correct = probability >= threshold
-        raw_values = np.asarray(ordered_values, dtype=float)
+        raw_values = np.asarray(numeric_values, dtype=float)
 
         return {
             "exercise": self.config.name,
@@ -79,8 +97,16 @@ class LiveRepetitionClassifier:
             "correct_probability": round(probability, 6),
             "decision_threshold": threshold,
             "observed_features": observed_count,
-            "total_features": len(ordered_values),
+            "total_features": len(numeric_values),
             "observed_feature_ratio": round(observed_ratio, 6),
+            "categorical_features": {
+                name: value
+                for name, value in zip(
+                    self.config.categorical_columns,
+                    categorical_values,
+                    strict=True,
+                )
+            },
             "reference_comparison": self.profile.compare(raw_values),
         }
 
@@ -93,3 +119,10 @@ class LiveRepetitionClassifier:
         except (TypeError, ValueError):
             return float("nan")
         return number if np.isfinite(number) else float("nan")
+
+    @staticmethod
+    def _category_or_unknown(value: object) -> str:
+        if value is None:
+            return "unknown"
+        normalized = canonical_name(value)
+        return normalized or "unknown"

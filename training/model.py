@@ -5,6 +5,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
@@ -17,6 +18,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
 
 
 class TrainingError(ValueError):
@@ -25,21 +27,68 @@ class TrainingError(ValueError):
 
 def build_classifier(
     *,
+    numeric_feature_names: tuple[str, ...],
+    categorical_feature_names: tuple[str, ...],
     n_estimators: int,
     max_depth: int | None,
     min_samples_leaf: int,
     max_features: str | float,
     random_state: int,
 ) -> Pipeline:
-    """Median imputation + missing mask + Random Forest."""
+    """Tiền xử lý numeric/categorical rồi train Random Forest."""
+    transformers: list[tuple[str, Pipeline, list[str]]] = [
+        (
+            "numeric",
+            Pipeline(
+                steps=[
+                    (
+                        "imputer",
+                        SimpleImputer(
+                            strategy="median",
+                            add_indicator=True,
+                            keep_empty_features=True,
+                        ),
+                    )
+                ]
+            ),
+            list(numeric_feature_names),
+        )
+    ]
+    if categorical_feature_names:
+        transformers.append(
+            (
+                "categorical",
+                Pipeline(
+                    steps=[
+                        (
+                            "imputer",
+                            SimpleImputer(
+                                strategy="constant",
+                                fill_value="unknown",
+                                keep_empty_features=True,
+                            ),
+                        ),
+                        (
+                            "one_hot",
+                            OneHotEncoder(
+                                handle_unknown="ignore",
+                                sparse_output=False,
+                            ),
+                        ),
+                    ]
+                ),
+                list(categorical_feature_names),
+            )
+        )
+
     return Pipeline(
         steps=[
             (
-                "imputer",
-                SimpleImputer(
-                    strategy="median",
-                    add_indicator=True,
-                    keep_empty_features=True,
+                "preprocessor",
+                ColumnTransformer(
+                    transformers=transformers,
+                    remainder="drop",
+                    verbose_feature_names_out=False,
                 ),
             ),
             (
@@ -140,6 +189,8 @@ def select_classifier(
     val_features: pd.DataFrame,
     val_labels: np.ndarray,
     *,
+    numeric_feature_names: tuple[str, ...],
+    categorical_feature_names: tuple[str, ...],
     n_estimators: int,
     threshold: float,
     random_state: int,
@@ -149,7 +200,12 @@ def select_classifier(
 
     results: list[dict[str, object]] = []
     for params in candidate_parameters(n_estimators):
-        model = build_classifier(**params, random_state=random_state)
+        model = build_classifier(
+            **params,
+            numeric_feature_names=numeric_feature_names,
+            categorical_feature_names=categorical_feature_names,
+            random_state=random_state,
+        )
         model.fit(train_features, train_labels)
         metrics = evaluate_classifier(model, val_features, val_labels, threshold)
         results.append({"parameters": params, "validation_metrics": metrics})
@@ -169,10 +225,18 @@ def fit_classifier(
     labels: np.ndarray,
     parameters: dict[str, object],
     random_state: int,
+    *,
+    numeric_feature_names: tuple[str, ...],
+    categorical_feature_names: tuple[str, ...],
 ) -> Pipeline:
     if len(np.unique(labels)) < 2:
         raise TrainingError("Cần cả label 0 và label 1 để train Random Forest")
-    model = build_classifier(**parameters, random_state=random_state)
+    model = build_classifier(
+        **parameters,
+        numeric_feature_names=numeric_feature_names,
+        categorical_feature_names=categorical_feature_names,
+        random_state=random_state,
+    )
     model.fit(features, labels)
     return model
 

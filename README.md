@@ -36,12 +36,15 @@ Cài cả dependency thị giác máy tính và training trong Python 3.11 (phù
 uv venv --python 3.11
 .venv\Scripts\activate
 uv pip install -r requirements.txt
-python realtime_predict.py
+python realtime_predict.py --camera-view front
 ```
 
 Giữ tư thế bắt đầu ổn định khoảng 0,5 giây, thực hiện trọn một repetition rồi
 quay về tư thế ban đầu. Chương trình chỉ dự đoán sau khi repetition hoàn thành.
 Nhấn `r` để lấy lại mốc góc ban đầu và `q` để thoát.
+
+`--camera-view` phải đúng với vị trí đặt camera trong dataset: `front`, `left`
+hoặc `right`. Ví dụ camera đặt bên trái người tập dùng `--camera-view left`.
 
 Webcam mặc định được yêu cầu ở độ phân giải `1280x720` và cửa sổ có thể kéo lớn
 nhỏ mà vẫn giữ tỷ lệ. Có thể chọn kích thước khác:

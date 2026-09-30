@@ -34,6 +34,11 @@ def parse_args() -> argparse.Namespace:
         help="Chỉ số webcam (vd 0) hoặc đường dẫn file video",
     )
     parser.add_argument("--exercise", default="Abduction")
+    parser.add_argument(
+        "--camera-view",
+        default="front",
+        help="Góc đặt camera giống dữ liệu train: front, left hoặc right",
+    )
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--artifact-dir", default=str(ROOT / "artifacts"))
     parser.add_argument("--min-visibility", type=float, default=0.5)
@@ -276,6 +281,7 @@ def run(args: argparse.Namespace) -> int:
     last_prediction_error: str | None = None
 
     print("Đã load model. Giữ tư thế bắt đầu ổn định khoảng 0,5 giây.")
+    print(f"Camera view dùng cho model: {args.camera_view}")
     print("Nhấn 'q' để thoát, 'r' để hiệu chuẩn lại.")
     try:
         while cap.isOpened():
@@ -296,7 +302,11 @@ def run(args: argparse.Namespace) -> int:
             if completed is not None:
                 repetition_count += 1
                 try:
-                    last_prediction = classifier.predict(completed.feature_values)
+                    model_features: dict[str, object] = {
+                        **completed.feature_values,
+                        "camera_view": args.camera_view,
+                    }
+                    last_prediction = classifier.predict(model_features)
                     last_prediction_error = None
                     output = {
                         "repetition": repetition_count,
@@ -304,7 +314,7 @@ def run(args: argparse.Namespace) -> int:
                         "turning_frame": completed.turning_frame,
                         "end_frame": completed.end_frame,
                         "driver_joint": completed.driver_joint,
-                        "features": completed.feature_values,
+                        "features": model_features,
                         "prediction": last_prediction,
                     }
                     print(json.dumps(output, ensure_ascii=False, indent=2))
