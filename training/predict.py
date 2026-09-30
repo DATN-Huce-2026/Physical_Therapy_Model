@@ -39,7 +39,7 @@ def predict(args: argparse.Namespace) -> list[dict[str, object]]:
 
     probabilities = correct_probabilities(artifact["model"], prepared.features)
     threshold = float(artifact["decision_threshold"])
-    raw_values = prepared.features.to_numpy(dtype=float)
+    raw_values = prepared.features.loc[:, config.feature_columns].to_numpy(dtype=float)
     results: list[dict[str, object]] = []
     for index, metadata in enumerate(prepared.metadata):
         probability = float(probabilities[index])

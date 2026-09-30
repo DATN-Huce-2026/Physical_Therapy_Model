@@ -16,24 +16,32 @@ class DatasetError(ValueError):
 @dataclass(frozen=True)
 class PreparedFeatures:
     features: pd.DataFrame
-    metadata: tuple[dict[str, str], ...]
+    metadata: tuple[dict[str, object], ...]
     feature_names: tuple[str, ...]
+    numeric_feature_names: tuple[str, ...]
+    categorical_feature_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class PreparedDataset:
     features: pd.DataFrame
     labels: np.ndarray
-    metadata: tuple[dict[str, str], ...]
+    metadata: tuple[dict[str, object], ...]
     feature_names: tuple[str, ...]
+    numeric_feature_names: tuple[str, ...]
+    categorical_feature_names: tuple[str, ...]
+
+    @property
+    def numeric_features(self) -> pd.DataFrame:
+        return self.features.loc[:, self.numeric_feature_names]
 
     @property
     def missing_cell_ratio(self) -> float:
-        return float(self.features.isna().to_numpy().mean())
+        return float(self.numeric_features.isna().to_numpy().mean())
 
     @property
     def rows_with_missing_ratio(self) -> float:
-        return float(self.features.isna().any(axis=1).mean())
+        return float(self.numeric_features.isna().any(axis=1).mean())
 
 
 def _read_csv(path: str | Path, source: str) -> pd.DataFrame:
@@ -72,10 +80,10 @@ def _check_unique_keys(frame: pd.DataFrame, source: str) -> None:
 def _prepare_feature_frame(
     angles_path: str | Path,
     config: ExerciseConfig,
-) -> tuple[pd.DataFrame, tuple[dict[str, str], ...]]:
+) -> tuple[pd.DataFrame, tuple[dict[str, object], ...]]:
     source = f"angles ({angles_path})"
     angles = _normalize_keys(_read_csv(angles_path, source))
-    required = {"exercise", "rep_id", *config.feature_columns}
+    required = {"exercise", "rep_id", *config.model_columns}
     _require_columns(angles, required, source)
     _check_unique_keys(angles, source)
 
@@ -85,7 +93,7 @@ def _prepare_feature_frame(
             f"Không có dữ liệu cho bài tập {config.name!r} trong {source}"
         )
 
-    features = angles.loc[:, config.feature_columns].copy()
+    features = angles.loc[:, config.model_columns].copy()
     for column in config.feature_columns:
         original = features[column]
         numeric = pd.to_numeric(original, errors="coerce")
@@ -97,17 +105,43 @@ def _prepare_feature_frame(
             raise DatasetError(f"Cột {column!r} chứa giá trị không phải số: {examples}")
         features[column] = numeric.astype(float)
 
-    values = features.to_numpy(dtype=float)
+    values = features.loc[:, config.feature_columns].to_numpy(dtype=float)
     if np.isinf(values).any():
         raise DatasetError("Feature chứa giá trị vô cực")
     observed = np.isfinite(values)
     if ((values[observed] < 0) | (values[observed] > 180)).any():
         raise DatasetError("Giá trị góc/ROM phải nằm trong khoảng 0–180 độ")
 
-    metadata = tuple(
-        {"exercise": row.exercise, "rep_id": str(row.rep_id)}
-        for row in angles.loc[:, ["exercise", "rep_id"]].itertuples(index=False)
-    )
+    for column in config.categorical_columns:
+        normalized: list[str | float] = []
+        for value in features[column]:
+            if pd.isna(value) or not str(value).strip():
+                normalized.append(np.nan)
+                continue
+            category = canonical_name(value)
+            if not category:
+                raise DatasetError(
+                    f"Cột {column!r} chứa category không hợp lệ: {value!r}"
+                )
+            normalized.append(category)
+        features[column] = normalized
+
+    metadata_items: list[dict[str, object]] = []
+    metadata_columns = ["exercise", "rep_id", *config.categorical_columns]
+    for row in angles.loc[:, metadata_columns].to_dict("records"):
+        item: dict[str, object] = {
+            "exercise": row["exercise"],
+            "rep_id": str(row["rep_id"]),
+        }
+        for column in config.categorical_columns:
+            value = row[column]
+            item[column] = (
+                canonical_name(value)
+                if not pd.isna(value) and str(value).strip()
+                else None
+            )
+        metadata_items.append(item)
+    metadata = tuple(metadata_items)
     return features.reset_index(drop=True), metadata
 
 
@@ -143,7 +177,9 @@ def load_features(
     return PreparedFeatures(
         features=features,
         metadata=metadata,
-        feature_names=config.feature_columns,
+        feature_names=config.model_columns,
+        numeric_feature_names=config.feature_columns,
+        categorical_feature_names=config.categorical_columns,
     )
 
 
@@ -182,5 +218,7 @@ def load_dataset(
         features=features,
         labels=np.asarray(y, dtype=np.int64),
         metadata=metadata,
-        feature_names=config.feature_columns,
+        feature_names=config.model_columns,
+        numeric_feature_names=config.feature_columns,
+        categorical_feature_names=config.categorical_columns,
     )

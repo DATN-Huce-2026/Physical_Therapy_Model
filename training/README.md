@@ -15,16 +15,16 @@ Quy ước nhãn:
 Thư mục dữ liệu phải có sáu file:
 
 ```text
-angles_train.csv   labels_train.csv
-angles_val.csv     labels_val.csv
-angles_test.csv    labels_test.csv
+angles_train_updated.csv   labels_train.csv
+angles_val_updated.csv     labels_val.csv
+angles_test_updated.csv    labels_test.csv
 ```
 
 `angles_*.csv`:
 
 ```csv
-exercise,rep_id,LEFT_ELBOW_start,LEFT_ELBOW_turning,LEFT_ELBOW_rom,...
-Abduction,R001,169.54,167.96,4.18,...
+exercise,rep_id,camera_view,LEFT_ELBOW_start,LEFT_ELBOW_turning,LEFT_ELBOW_rom,...
+Abduction,R001,Front,169.54,167.96,4.18,...
 ```
 
 `labels_*.csv`:
@@ -35,14 +35,16 @@ Abduction,R001,1
 Abduction,R002,0
 ```
 
-Ô trống được giữ là `NaN`. Pipeline fit median imputer trên tập train, đồng thời thêm
-missing indicator trước khi đưa dữ liệu vào Random Forest. Validation dùng để chọn
-`max_depth`, `min_samples_leaf` và `max_features`; test chỉ dùng để đánh giá cuối.
+Ô trống được giữ là `NaN`. Pipeline fit median imputer và missing indicator cho
+các góc; `camera_view` được chuẩn hóa thành `front/left/right`, điền `unknown` nếu
+thiếu rồi One-hot Encoding. Validation dùng để chọn `max_depth`,
+`min_samples_leaf` và `max_features`; test chỉ dùng để đánh giá cuối.
 
 ## Train
 
 ```powershell
-python -m training.train --data-dir "C:\path\to\dataset" --exercise Abduction
+python -m training.train --data-dir "C:\path\to\dataset" `
+  --angles-suffix _updated --exercise Abduction
 ```
 
 Kết quả:
@@ -73,10 +75,10 @@ python -m training.predict --angles datasets/new_repetitions.csv --exercise Abdu
 trực tiếp trong bộ nhớ và không tạo CSV tạm:
 
 ```powershell
-python realtime_predict.py --source 0 --exercise Abduction
+python realtime_predict.py --source 0 --exercise Abduction --camera-view front
 ```
 
 Model không dự đoán từng frame. `src/repetition_tracker.py` theo dõi chuỗi góc,
-phát hiện điểm đổi chiều và chỉ gửi 12 feature vào model sau khi người tập quay
-về tư thế ban đầu. Nếu quan sát được dưới 50% feature, chương trình từ chối dự
-đoán thay vì tự thay khớp bị khuất bằng góc 0.
+phát hiện điểm đổi chiều và chỉ gửi 12 feature góc cùng `camera_view` vào model
+sau khi người tập quay về tư thế ban đầu. Nếu quan sát được dưới 50% feature góc,
+chương trình từ chối dự đoán thay vì tự thay khớp bị khuất bằng góc 0.

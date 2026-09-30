@@ -36,41 +36,87 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exercise", required=True, help="Tên bài tập")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--output-dir", default="artifacts")
+    parser.add_argument(
+        "--angles-suffix",
+        default="",
+        help="Hậu tố file angles, ví dụ _updated -> angles_train_updated.csv",
+    )
     parser.add_argument("--n-estimators", type=int, default=300)
     parser.add_argument("--random-state", type=int, default=42)
     return parser.parse_args()
 
 
-def _load_split(data_dir: Path, split: str, config) -> PreparedDataset:
+def _load_split(
+    data_dir: Path,
+    split: str,
+    config,
+    angles_suffix: str = "",
+) -> PreparedDataset:
     return load_dataset(
-        data_dir / f"angles_{split}.csv",
+        data_dir / f"angles_{split}{angles_suffix}.csv",
         data_dir / f"labels_{split}.csv",
         config,
     )
 
 
 def _split_summary(dataset: PreparedDataset) -> dict[str, object]:
-    return {
+    summary: dict[str, object] = {
         "repetitions": len(dataset.labels),
         "incorrect_label_0": int((dataset.labels == 0).sum()),
         "correct_label_1": int((dataset.labels == 1).sum()),
         "missing_cell_ratio": round(dataset.missing_cell_ratio, 6),
         "rows_with_missing_ratio": round(dataset.rows_with_missing_ratio, 6),
     }
+    if dataset.categorical_feature_names:
+        summary["categorical_distribution"] = {}
+        for column in dataset.categorical_feature_names:
+            distribution: dict[str, object] = {}
+            values = dataset.features[column].fillna("unknown")
+            for category in sorted(values.unique()):
+                mask = values == category
+                labels = dataset.labels[mask.to_numpy()]
+                distribution[str(category)] = {
+                    "repetitions": int(mask.sum()),
+                    "incorrect_label_0": int((labels == 0).sum()),
+                    "correct_label_1": int((labels == 1).sum()),
+                }
+            summary["categorical_distribution"][column] = distribution
+    return summary
+
+
+def _metrics_by_category(
+    model,
+    dataset: PreparedDataset,
+    column: str,
+    threshold: float,
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    values = dataset.features[column].fillna("unknown")
+    for category in sorted(values.unique()):
+        mask = values == category
+        result[str(category)] = evaluate_classifier(
+            model,
+            dataset.features.loc[mask].reset_index(drop=True),
+            dataset.labels[mask.to_numpy()],
+            threshold,
+        )
+    return result
 
 
 def train(args: argparse.Namespace) -> dict[str, object]:
     config = load_exercise_config(args.config, args.exercise)
     data_dir = Path(args.data_dir)
-    train_set = _load_split(data_dir, "train", config)
-    val_set = _load_split(data_dir, "val", config)
-    test_set = _load_split(data_dir, "test", config)
+    train_set = _load_split(data_dir, "train", config, args.angles_suffix)
+    val_set = _load_split(data_dir, "val", config, args.angles_suffix)
+    test_set = _load_split(data_dir, "test", config, args.angles_suffix)
 
     best_parameters, search_results = select_classifier(
         train_set.features,
         train_set.labels,
         val_set.features,
         val_set.labels,
+        numeric_feature_names=config.feature_columns,
+        categorical_feature_names=config.categorical_columns,
         n_estimators=args.n_estimators,
         threshold=config.decision_threshold,
         random_state=args.random_state,
@@ -81,6 +127,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         train_set.labels,
         best_parameters,
         args.random_state,
+        numeric_feature_names=config.feature_columns,
+        categorical_feature_names=config.categorical_columns,
     )
     validation_metrics = evaluate_classifier(
         selection_model,
@@ -98,6 +146,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         combined_labels,
         best_parameters,
         args.random_state,
+        numeric_feature_names=config.feature_columns,
+        categorical_feature_names=config.categorical_columns,
     )
     test_metrics = evaluate_classifier(
         final_model,
@@ -107,7 +157,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     )
 
     profile = fit_reference_profile(
-        combined_features.to_numpy(dtype=float),
+        combined_features.loc[:, config.feature_columns].to_numpy(dtype=float),
         combined_labels,
         exercise=config.name,
         feature_names=config.feature_columns,
@@ -117,17 +167,24 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     )
 
     missing_model = fit_missingness_baseline(
-        train_set.features, train_set.labels, args.random_state
+        train_set.numeric_features, train_set.labels, args.random_state
     )
     missing_validation = evaluate_missingness_baseline(
-        missing_model, val_set.features, val_set.labels
+        missing_model, val_set.numeric_features, val_set.labels
     )
     final_missing_model = fit_missingness_baseline(
-        combined_features, combined_labels, args.random_state
+        combined_features.loc[:, config.feature_columns],
+        combined_labels,
+        args.random_state,
     )
     missing_test = evaluate_missingness_baseline(
-        final_missing_model, test_set.features, test_set.labels
+        final_missing_model, test_set.numeric_features, test_set.labels
     )
+
+    categorical_values = {
+        column: sorted(combined_features[column].dropna().astype(str).unique().tolist())
+        for column in config.categorical_columns
+    }
 
     artifact_dir = Path(args.output_dir) / config.name
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -136,7 +193,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         final_model,
         {
             "exercise": config.name,
-            "feature_names": config.feature_columns,
+            "feature_names": config.model_columns,
+            "numeric_feature_names": config.feature_columns,
+            "categorical_feature_names": config.categorical_columns,
+            "categorical_values": categorical_values,
             "decision_threshold": config.decision_threshold,
             "label_meaning": {0: "incorrect", 1: "correct"},
             "parameters": best_parameters,
@@ -147,8 +207,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     report: dict[str, object] = {
         "exercise": config.name,
         "label_meaning": {"0": "incorrect/false", "1": "correct/true"},
-        "feature_count": len(config.feature_columns),
-        "features": list(config.feature_columns),
+        "feature_count": len(config.model_columns),
+        "features": list(config.model_columns),
+        "numeric_features": list(config.feature_columns),
+        "categorical_features": list(config.categorical_columns),
+        "categorical_values": categorical_values,
         "splits": {
             "train": _split_summary(train_set),
             "validation": _split_summary(val_set),
@@ -157,6 +220,15 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "selected_parameters": best_parameters,
         "validation_metrics": validation_metrics,
         "test_metrics": test_metrics,
+        "test_metrics_by_category": {
+            column: _metrics_by_category(
+                final_model,
+                test_set,
+                column,
+                config.decision_threshold,
+            )
+            for column in config.categorical_columns
+        },
         "missingness_only_baseline": {
             "validation": missing_validation,
             "test": missing_test,

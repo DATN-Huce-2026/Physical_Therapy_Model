@@ -14,6 +14,7 @@
       "RIGHT_SHOULDER_turning",
       "RIGHT_SHOULDER_rom"
     ],
+    "categorical_columns": ["camera_view"],
     "lower_percentile": 5,
     "upper_percentile": 95,
     "profile_margin_deg": 3,

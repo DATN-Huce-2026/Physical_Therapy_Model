@@ -19,6 +19,7 @@ class ExerciseConfig:
 
     name: str
     feature_columns: tuple[str, ...]
+    categorical_columns: tuple[str, ...] = ()
     lower_percentile: float = 5.0
     upper_percentile: float = 95.0
     profile_margin_deg: float = 3.0
@@ -29,9 +30,13 @@ class ExerciseConfig:
         features = tuple(
             canonical_name(column) for column in payload.get("feature_columns", [])
         )
+        categorical = tuple(
+            canonical_name(column) for column in payload.get("categorical_columns", [])
+        )
         config = cls(
             name=canonical_name(name),
             feature_columns=features,
+            categorical_columns=categorical,
             lower_percentile=float(payload.get("lower_percentile", 5.0)),
             upper_percentile=float(payload.get("upper_percentile", 95.0)),
             profile_margin_deg=float(payload.get("profile_margin_deg", 3.0)),
@@ -47,12 +52,24 @@ class ExerciseConfig:
             raise ValueError(f"Bài tập {self.name!r} chưa khai báo feature_columns")
         if len(set(self.feature_columns)) != len(self.feature_columns):
             raise ValueError(f"Bài tập {self.name!r} có feature bị lặp")
+        if len(set(self.categorical_columns)) != len(self.categorical_columns):
+            raise ValueError(f"Bài tập {self.name!r} có categorical feature bị lặp")
+        overlap = set(self.feature_columns) & set(self.categorical_columns)
+        if overlap:
+            raise ValueError(
+                f"Feature không được vừa numeric vừa categorical: {sorted(overlap)}"
+            )
         if not 0 <= self.lower_percentile < self.upper_percentile <= 100:
             raise ValueError("Percentile phải thỏa 0 <= lower < upper <= 100")
         if self.profile_margin_deg < 0:
             raise ValueError("profile_margin_deg phải >= 0")
         if not 0 < self.decision_threshold < 1:
             raise ValueError("decision_threshold phải nằm trong (0, 1)")
+
+    @property
+    def model_columns(self) -> tuple[str, ...]:
+        """Toàn bộ đầu vào của model: góc số trước, categorical sau."""
+        return self.feature_columns + self.categorical_columns
 
 
 def load_exercise_config(path: str | Path, exercise: str) -> ExerciseConfig:
