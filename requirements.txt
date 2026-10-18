@@ -17,3 +17,6 @@ seaborn>=0.12.0
 # Hỗ trợ tiến trình và môi trường Jupyter Notebook
 tqdm>=4.65.0
 ipykernel>=6.25.0
+
+# Model v5 multi-task (BiGRU) cho dữ liệu Kinect KERAAL: test_keraal_mtl.py
+torch>=2.2

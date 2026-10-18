@@ -123,3 +123,20 @@ Giá trị **thô vẫn được giữ nguyên** trong file log bên cạnh giá
   lượng video đầu vào.
 - Khớp có `visibility` dưới ngưỡng bị bỏ qua, nên video chỉ quay nửa thân trên
   sẽ không có dữ liệu gối và cổ chân.
+
+## Test một lần tập bằng Model v5: đúng/sai, sai ở đâu, chấm điểm
+
+`realtime_keraal_mtl.py` dùng model multi-task đã train (`artifacts/keraal_mtl_v5/best_model.pt`,
+bài CTK/ELK/RTK của bộ KERAAL) để đánh giá một lần tập từ webcam hoặc video:
+
+```powershell
+python realtime_keraal_mtl.py --source 0 --exercise CTK              # webcam
+python realtime_keraal_mtl.py --source video.mp4 --exercise ELK --no-display
+```
+
+- Webcam: SPACE bắt đầu (đếm ngược 3 giây), SPACE kết thúc một lần tập, `q` thoát.
+  Video file: cả video là một lần tập. `--report ket_qua.json` để lưu kết quả.
+- Kết quả mỗi lần tập: **ĐÚNG/SAI**, **điểm 0-100** và xếp loại; nếu sai thì
+  **loại lỗi**, **bộ phận** (cột sống, cả hai tay, tay phải, tay trái) và **mức độ**.
+- Cần `torch`. Đặt virtualenv ở đường dẫn không dấu (MediaPipe lỗi với chữ "Đ").
+- Mô tả cụ thể của Error1/2/3 sửa trong `keraal_mtl/error_descriptions.json`.
